@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	verbose = flag.Bool("v", true, "verbose")
+	verbose = flag.Bool("v", false, "verbose")
 )
 
 const usageFooter = `

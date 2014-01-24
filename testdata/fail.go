@@ -5,12 +5,12 @@ func BasicTypes() {
 	i = 5
 	// BREAKPOINT
 	// printf "%d", i
-	// 5
+	// 6
 	_ = i
 	var b bool
 	// BREAKPOINT
 	// print b
-	// \$. = false
+	// \$. = fals
 	_ = b
 }
 

@@ -10,9 +10,11 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 
 var (
 	verbose = flag.Bool("v", false, "verbose")
+	debug   = flag.Bool("d", false, "print lots of debug goop")
 )
 
 const usageFooter = `
@@ -28,6 +31,28 @@ gdb-test runs automated tests of Go's gdb integration.
 
 TODO: Describe the format of the automated tests.
 `
+
+// ScriptContext is all the information needed to
+// generate a debugger test script from a template.
+// TODO: Better name.
+type ScriptContext struct {
+	GoRoot      string
+	Sock        string // socket path for sending replies to
+	Breakpoints []Breakpoint
+}
+
+// TestResult represents something that happened while running a test.
+// TODO: Better naming
+type TestResult struct {
+	Status string `json:"status"` // "RUNNING", "PASS", "FAIL"
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Msg    string `json:"msg"`
+}
+
+func (tr TestResult) String() string {
+	return fmt.Sprintf("%s:%d %s %s", tr.File, tr.Line, tr.Status, tr.Msg)
+}
 
 func main() {
 	flag.Usage = func() {
@@ -46,21 +71,29 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	gdb, err := exec.LookPath("gdb")
+	cmd := exec.Command(goTool, "env", "GOROOT")
+	goRootBuf := new(bytes.Buffer)
+	cmd.Stdout = goRootBuf
+	if err := cmd.Run(); err != nil {
+		fatal(err)
+	}
+	goRoot := strings.TrimSpace(goRootBuf.String())
+
+	gdb, err := NewGdb()
 	if err != nil {
 		fatal(err)
 	}
 
 	// Set up temp dir
-	tempDir, err := ioutil.TempDir("", "gdb-test")
+	tempDir, err := ioutil.TempDir("", "go-debugger-test")
 	if err != nil {
 		fatal(err)
 	}
-	if *verbose {
+	if *debug {
 		fmt.Println("Using temp dir", tempDir)
 	}
 	defer func() {
-		if *verbose {
+		if *debug {
 			fmt.Println("Removing temp dir", tempDir)
 		}
 		err := os.RemoveAll(tempDir)
@@ -69,35 +102,40 @@ func main() {
 		}
 	}()
 
+	// Set up socket for receiving replies
+	sock := filepath.Join(tempDir, "status.sock")
+	listener, err := net.Listen("unix", sock)
+	if err != nil {
+		fatal(err)
+	}
+
 	for _, source := range flag.Args() {
 		if !strings.HasSuffix(source, ".go") {
-			fmt.Printf("Skipping test %s: Does not have .go suffix\n", source)
+			fmt.Printf("SKIPPING test %s: Does not have .go suffix\n", source)
 			continue
 		}
 
-		if *verbose {
-			fmt.Println("Running test %s", source)
+		if *debug {
+			fmt.Printf("Running test %s\n", source)
 		}
 
+		// Parse test case
 		f, err := os.Open(source)
 		if err != nil {
 			fatal(err)
 		}
-
-		// Parse test cases from source
 		bps, err := Parse(f, source)
 		if err != nil {
-			fatal(err)
-		}
-		if *verbose {
-			fmt.Println("Parsed breakpoints: ", bps)
+			fmt.Printf("SKIPPING test %s: Failed to parse: %v\n", source, err)
+			f.Close()
+			continue
 		}
 		f.Close()
 
 		// Build executable
 		executable := filepath.Join(tempDir, source[:len(source)-len(".go")])
 		cmd := exec.Command(goTool, "build", "-o", executable, "-gcflags", "-N -l", source)
-		if *verbose {
+		if *debug {
 			fmt.Println("Running", cmd)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -105,123 +143,52 @@ func main() {
 		if err := cmd.Run(); err != nil {
 			fatal(err)
 		}
-		if *verbose {
-			fmt.Println("Built executable:", executable)
-		}
 
-		// Figure out GOROOT
-		cmd = exec.Command(goTool, "env", "GOROOT")
-		goRootBuf := new(bytes.Buffer)
-		cmd.Stdout = goRootBuf
-		if *verbose {
-			fmt.Println("Running", cmd)
-			cmd.Stderr = os.Stderr
-		}
-		if err := cmd.Run(); err != nil {
-			fatal(err)
-		}
-		goRoot := strings.TrimSpace(goRootBuf.String())
-
-		// Construct gdb script
-		scriptPath := filepath.Join(tempDir, "script.gdb")
-		script, err := os.Create(scriptPath)
-		if err != nil {
-			fatal(err)
-		}
-		fmt.Fprintf(script, "add-auto-load-safe-path %s/src/pkg/runtime/runtime-gdb.py\n", goRoot)
-
-		prolog := `python
-import re
-def test(command, want, context):
-    out = gdb.execute(command, False, True)
-    err = "Breakpoint {context} want regex {want} have {out}".format(**locals())
-    match = re.match(want, out)
-    assert match is not None, err
-end
-`
-
-		fmt.Fprint(script, prolog)
-		for _, bp := range bps {
-			fmt.Fprintf(script, "tbreak %s:%d\n", bp.Filename, bp.Line)
-			fmt.Fprintln(script, "commands")
-			if !*verbose {
-				fmt.Fprintln(script, "silent")
+		// Listen for replies and parse them
+		replyc := make(chan TestResult)
+		go func() {
+			conn, err := listener.Accept()
+			if err != nil {
+				fatal(err)
 			}
-			for i, command := range bp.Commands {
-				fmt.Fprintf(script, "python test(%q, %q, \"%s:%d\")\n", command, "^"+bp.Want[i]+"$", bp.Filename, bp.Line)
-			}
-			fmt.Fprintln(script, "continue")
-			fmt.Fprintln(script, "end")
-		}
-		fmt.Fprintln(script, "run")
-		script.Close()
-		if *verbose {
-			fmt.Println("Script:")
-			all, _ := ioutil.ReadFile(scriptPath)
-			fmt.Println(string(all))
-		}
-
-		// Run gdb, hope for the best
-		// TODO: Check gdb version?
-		batch := "--batch-silent"
-		if *verbose {
-			batch = "--batch"
-		}
-		cmd = exec.Command(gdb, executable,
-			batch,
-			"--return-child-result",
-			"--command", scriptPath,
-			"--nx", // ignore .gdbinit
-			"--quiet",
-		)
-		gdbOut := new(bytes.Buffer)
-		cmd.Stderr = gdbOut
-		if *verbose {
-			fmt.Println("Running", cmd)
-			cmd.Stdout = os.Stdout
-		}
-		err = cmd.Run()
-		if err == nil {
-			fmt.Printf("PASS %v\n", source)
-			continue
-		}
-
-		exitErr, ok := err.(*exec.ExitError)
-		if !ok {
-			if *verbose {
-				fmt.Printf("gdb output:\n\n%s\n\n", gdbOut.String())
-			}
-			fmt.Printf("err %T %v", err, err)
-			fatal(err)
-		}
-
-		// gdbDump := gdbOut.String()
-		// TODO: How to check for a bug in this code vs. a test failure?
-		if !exitErr.Success() {
-			// Scan through looking for assertion errors that we've triggered
-			scan := bufio.NewScanner(gdbOut)
+			scan := bufio.NewScanner(conn)
 			for scan.Scan() {
-				line := scan.Text()
-				line = strings.TrimSpace(line)
-				// fmt.Printf("EXAMINING %q\n", line)
-				switch {
-				case strings.HasPrefix(line, "AssertionError: Breakpoint"):
-					line = line[len("AssertionError: "):]
-					fmt.Println(line) // TODO: Gussy up more?
-					// case strings.HasPrefix(line, "Traceback"):
-					// 	fmt.Println("Oops, something went wrong. Maybe you have an unreachable breakpoint?")
-					// 	fmt.Printf("\n--- RAW GDB OUTPUT ---\n:\n\n%s\n\n------\n", gdbDump)
+				line := scan.Bytes()
+				var res TestResult
+				err := json.Unmarshal(line, &res)
+				if err != nil {
+					fatal(err)
 				}
+				replyc <- res
 			}
 			if err := scan.Err(); err != nil {
 				fatal(err)
 			}
+		}()
+
+		go func() {
+			for reply := range replyc {
+				if reply.Status == "FAIL" || *verbose {
+					fmt.Printf("%v\n", reply)
+				}
+			}
+		}()
+
+		// Run gdb
+		scriptPath := filepath.Join(tempDir, "script.gdb")
+		dot := ScriptContext{GoRoot: goRoot, Sock: sock, Breakpoints: bps}
+		if err := gdb.WriteScript(scriptPath, dot); err != nil {
+			fatal(err)
 		}
+		if err := gdb.Run(executable, scriptPath); err != nil {
+			fatal(err)
+		}
+
+		close(replyc)
 	}
 }
 
 func fatal(e error) {
-	fmt.Println("HI")
 	fmt.Println(e)
 	os.Exit(1)
 }

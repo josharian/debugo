@@ -7,11 +7,22 @@ import (
 	"strings"
 )
 
-type Breakpoint struct {
+// TODO: multiple output?
+// TODO: clean up code
+// TODO: support (gdb), (lldb), (*db)
+
+type Test struct {
 	Filename string
 	Line     int
-	Commands []string // gdb command to run; commands correspond by index to entries in want
-	Want     []string // regular expressions indicating the desired reply
+	Command  string // debugger command to run
+	Want     string // regex desired response
+}
+
+type Breakpoint struct {
+	Filename  string
+	Line      int
+	GdbTests  []Test
+	LldbTests []Test
 }
 
 func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
@@ -19,6 +30,7 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 	var commandNext, wantNext bool
 	var lineno int
 	var bp Breakpoint
+	var t Test
 	scan := bufio.NewScanner(r)
 	for scan.Scan() {
 		lineno++
@@ -26,9 +38,9 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 		line = strings.TrimSpace(line)
 
 		if commandNext {
-			if !strings.HasPrefix(line, "//") {
-				if len(bp.Commands) == 0 {
-					return nil, fmt.Errorf("%s:%d expected //-prefixed command, got %q", filename, lineno, line)
+			if !strings.HasPrefix(line, "// (gdb) ") {
+				if len(bp.GdbTests) == 0 {
+					return nil, fmt.Errorf("%s:%d expected // (gdb) command, got %q", filename, lineno, line)
 				} else {
 					// No further commands; we're done with this breakpoint
 					bps = append(bps, bp)
@@ -37,7 +49,7 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 					continue
 				}
 			}
-			bp.Commands = append(bp.Commands, strings.TrimSpace(line[2:]))
+			t = Test{Command: strings.TrimSpace(line[len("// (gdb) "):]), Line: lineno}
 			commandNext = false
 			wantNext = true
 			continue
@@ -47,7 +59,15 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 			if !strings.HasPrefix(line, "//") {
 				return nil, fmt.Errorf("%s:%d expected //-prefixed regex, got %q", filename, lineno, line)
 			}
-			bp.Want = append(bp.Want, strings.TrimSpace(line[2:]))
+			t.Want = strings.TrimSpace(line[2:])
+			if !strings.HasPrefix(t.Want, "^") {
+				t.Want = "^" + t.Want
+			}
+			if !strings.HasSuffix(t.Want, "$") {
+				t.Want = t.Want + "$"
+			}
+			bp.GdbTests = append(bp.GdbTests, t)
+			t = Test{}
 			commandNext = true
 			wantNext = false
 			continue

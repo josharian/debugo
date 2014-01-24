@@ -1,11 +1,12 @@
 // gdb-test runs automated tests of Go's gdb integration.
 //
-// TODO: Nice high-level description of how this works.
 package main
 
 // TODO:
-// * better input/output parsing -- multiline output, etc.
-// * spot check against lldb
+// * Nice docs for how to write + run tests
+// * Nice high-level description of how this works
+// * lldb basics; more refactoring to make gdb/lldb interface similar
+// * better socket handling (what do we want here?)
 
 import (
 	"bufio"

@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-// TODO: multiple output?
-// TODO: clean up code
+// TODO: multiple line output?
+// TODO: clean up code -- use a real state machine instead of this goop
 // TODO: support (gdb), (lldb), (*db)
+// TODO: Better error messages
 
 type Test struct {
 	Filename string

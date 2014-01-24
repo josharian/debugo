@@ -1,4 +1,4 @@
-// gdb-test runs automated tests of Go's gdb integration.
+// debugger-test runs automated tests of Go's gdb integration.
 //
 package main
 
@@ -28,9 +28,9 @@ var (
 )
 
 const usageFooter = `
-gdb-test runs automated tests of Go's gdb integration.
+debugger-test runs automated tests of Go's gdb and lldb integration.
 
-TODO: Describe the format of the automated tests.
+TODO: Describe the format of the automated tests, usage, etc.
 `
 
 // ScriptContext is all the information needed to

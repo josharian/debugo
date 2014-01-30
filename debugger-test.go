@@ -1,9 +1,9 @@
-// debugger-test runs automated tests of Go's gdb integration.
+// debugger-test runs automated tests of Go's gdb and lldb support.
 //
 package main
 
 // TODO:
-// * Nice docs for how to write + run tests
+// * Nice docs for how to write + run tests (NB: each bp only fires once)
 // * Nice high-level description of how this works
 // * lldb basics; more refactoring to make gdb/lldb interface similar
 // * better socket handling (what do we want here?)
@@ -25,6 +25,8 @@ import (
 var (
 	verbose = flag.Bool("v", false, "verbose")
 	debug   = flag.Bool("d", false, "print lots of debug goop")
+	noGdb   = flag.Bool("no-gdb", false, "skip gdb")
+	noLldb  = flag.Bool("no-lldb", false, "skip lldb")
 )
 
 const usageFooter = `
@@ -40,12 +42,13 @@ type ScriptContext struct {
 	GoRoot      string
 	Sock        string // socket path for sending replies to
 	Breakpoints []Breakpoint
+	Executable  string
 }
 
 // TestResult represents something that happened while running a test.
 // TODO: Better naming
 type TestResult struct {
-	Status string `json:"status"` // "RUNNING", "PASS", "FAIL"
+	Status string `json:"status"` // "RUNNING", "PASS", "FAIL", "ERROR", "INFO"
 	File   string `json:"file"`
 	Line   int    `json:"line"`
 	Msg    string `json:"msg"`
@@ -80,9 +83,26 @@ func main() {
 	}
 	goRoot := strings.TrimSpace(goRootBuf.String())
 
-	gdb, err := NewGdb()
-	if err != nil {
-		fatal(err)
+	debuggers := make([]Debugger, 0, 2)
+	if !*noGdb {
+		gdb := new(Gdb)
+		if err := gdb.Init(); err != nil {
+			fmt.Printf("SKIPPING gdb: %v\n", err)
+		} else {
+			debuggers = append(debuggers, gdb)
+		}
+	}
+	if !*noLldb {
+		lldb := new(Lldb)
+		if err := lldb.Init(); err != nil {
+			fmt.Printf("SKIPPING lldb: %v\n", err)
+		} else {
+			debuggers = append(debuggers, lldb)
+		}
+	}
+	if len(debuggers) == 0 {
+		fmt.Println("No debuggers available.")
+		os.Exit(1) // rc 0?
 	}
 
 	// Set up temp dir
@@ -109,6 +129,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	defer listener.Close()
 
 	for _, source := range flag.Args() {
 		if !strings.HasSuffix(source, ".go") {
@@ -145,51 +166,80 @@ func main() {
 			fatal(err)
 		}
 
-		// Listen for replies and parse them
-		replyc := make(chan TestResult)
-		go func() {
-			conn, err := listener.Accept()
-			if err != nil {
-				fatal(err)
-			}
-			scan := bufio.NewScanner(conn)
-			for scan.Scan() {
-				line := scan.Bytes()
-				var res TestResult
-				err := json.Unmarshal(line, &res)
+		// Test with all debuggers
+		for _, d := range debuggers {
+
+			// Listen for replies and parse them
+			replyc := make(chan TestResult)
+			go func() {
+				conn, err := listener.Accept()
 				if err != nil {
 					fatal(err)
 				}
-				replyc <- res
-			}
-			if err := scan.Err(); err != nil {
+				scan := bufio.NewScanner(conn)
+				for scan.Scan() {
+					line := scan.Bytes()
+					var res TestResult
+					err := json.Unmarshal(line, &res)
+					if err != nil {
+						fmt.Println("Failed to unmarshal JSON:", string(line))
+						fatal(err)
+					}
+					replyc <- res
+				}
+				if err := scan.Err(); err != nil {
+					fatal(err)
+				}
+			}()
+
+			go func() {
+				// TODO: Count to make sure we ran the expected number of tests
+				// TODO: better print of info/error messages w/ no file/lineno
+				for reply := range replyc {
+					if reply.Status == "FAIL" || *verbose {
+						fmt.Printf("[%s] %v\n", d.Name(), reply)
+					}
+				}
+			}()
+
+			// Run debugger
+			scriptPath := filepath.Join(tempDir, "script."+d.Name())
+			dot := ScriptContext{GoRoot: goRoot, Sock: sock, Breakpoints: bps, Executable: executable}
+			if err := writeScript(d, scriptPath, dot); err != nil {
 				fatal(err)
 			}
-		}()
-
-		go func() {
-			for reply := range replyc {
-				if reply.Status == "FAIL" || *verbose {
-					fmt.Printf("%v\n", reply)
-				}
+			if err := d.Run(executable, scriptPath); err != nil {
+				fatal(err)
 			}
-		}()
 
-		// Run gdb
-		scriptPath := filepath.Join(tempDir, "script.gdb")
-		dot := ScriptContext{GoRoot: goRoot, Sock: sock, Breakpoints: bps}
-		if err := gdb.WriteScript(scriptPath, dot); err != nil {
-			fatal(err)
+			close(replyc)
 		}
-		if err := gdb.Run(executable, scriptPath); err != nil {
-			fatal(err)
-		}
-
-		close(replyc)
 	}
 }
 
 func fatal(e error) {
 	fmt.Println(e)
 	os.Exit(1)
+}
+
+func writeScript(d Debugger, scriptPath string, dot ScriptContext) error {
+	script, err := os.Create(scriptPath)
+	if err != nil {
+		return err
+	}
+	defer script.Close()
+	if err := d.ScriptTemplate().Execute(script, dot); err != nil {
+		return err
+	}
+	if *debug {
+		fmt.Println("Script:")
+		if all, err := ioutil.ReadFile(scriptPath); err == nil {
+			fmt.Println("----")
+			fmt.Println(string(all))
+			fmt.Println("----")
+		} else {
+			fmt.Println(err)
+		}
+	}
+	return nil
 }

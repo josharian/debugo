@@ -7,7 +7,7 @@ func BasicTypes() {
 	// (gdb) printf "%d", i
 	// 6
 	// (gdb) print i
-	// \$. = 5
+	// \$. = 7
 	_ = i
 	var b bool
 	// BREAKPOINT

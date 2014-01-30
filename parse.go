@@ -10,7 +10,10 @@ import (
 // TODO: multiple line output?
 // TODO: clean up code -- use a real state machine instead of this goop
 // TODO: support (gdb), (lldb), (*db)
+// TODO: Handle lldb vs gdb properly
 // TODO: Better error messages
+// TODO: Use go/ast to find comments instead of //-prefix checking
+// TODO: Use nested comments (// //) to allow comments in tests?
 
 type Test struct {
 	Filename string
@@ -39,6 +42,10 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 		line = strings.TrimSpace(line)
 
 		if commandNext {
+			// TODO: This is ugly
+			if strings.HasPrefix(line, "// //") {
+				continue
+			}
 			if !strings.HasPrefix(line, "// (gdb) ") {
 				if len(bp.GdbTests) == 0 {
 					return nil, fmt.Errorf("%s:%d expected // (gdb) command, got %q", filename, lineno, line)
@@ -57,6 +64,10 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 		}
 
 		if wantNext {
+			// TODO: This is ugly
+			if strings.HasPrefix(line, "// //") {
+				continue
+			}
 			if !strings.HasPrefix(line, "//") {
 				return nil, fmt.Errorf("%s:%d expected //-prefixed regex, got %q", filename, lineno, line)
 			}
@@ -68,6 +79,7 @@ func Parse(r io.Reader, filename string) ([]Breakpoint, error) {
 				t.Want = t.Want + "$"
 			}
 			bp.GdbTests = append(bp.GdbTests, t)
+			bp.LldbTests = append(bp.LldbTests, t)
 			t = Test{}
 			commandNext = true
 			wantNext = false

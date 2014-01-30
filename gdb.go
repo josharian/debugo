@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"text/template"
@@ -18,18 +17,32 @@ import socket
 
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 sock.connect("{{.Sock}}")
-def test(command, want, filename, line):
-	sock.send(json.dumps({"status": "RUNNING", "file": filename, "line": line}) + "\n")
+
+def send_result(status, msg=None, filename=None, lineno=None):
+	res = {"status": status}
+	if msg is not None:
+		res["msg"] = str(msg)
+	if filename is not None:
+		res["file"] = filename
+	if lineno is not None:
+		res["line"] = lineno
+	dump = json.dumps(res) + "\n"
+	enc = dump.encode('ascii')
+	sock.sendall(enc)
+
+def test(command, want, filename, lineno):
+	send_result("RUNNING", command, filename, lineno)
 	out = gdb.execute(command, False, True)
 	match = re.match(want, out)
 	if match is None:
 		msg = "want regex {want} have {out}".format(**locals())
-		sock.send(json.dumps({"status": "FAIL", "file": filename, "line": line, "msg": msg}) + "\n")
+		send_result("FAIL", msg, filename, lineno)
 	else:
-		sock.send(json.dumps({"status": "PASS", "file": filename, "line": line}) + "\n")
+		send_result("PASS", None, filename, lineno)
 end
 
 {{range $bp := .Breakpoints}}
+{{if .GdbTests}}
 tbreak {{$bp.Filename}}:{{$bp.Line}}
 commands
 silent
@@ -38,6 +51,7 @@ python test({{$test.Command | printf "%q"}}, {{$test.Want | printf "%q"}}, {{$bp
 {{end}}
 continue
 end
+{{end}}
 {{end}}
 run
 `
@@ -48,37 +62,15 @@ type Gdb struct {
 	Template *template.Template
 }
 
-func NewGdb() (*Gdb, error) {
+func (g *Gdb) Init() error {
 	path, err := exec.LookPath("gdb")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	gdb := &Gdb{Path: path}
-	gdb.Template = template.Must(template.New("script").Parse(gdbScriptTemplate))
+	g.Path = path
+	g.Template = template.Must(template.New("script").Parse(gdbScriptTemplate))
 
 	// TODO: Check gdb version
-	return gdb, nil
-}
-
-func (g *Gdb) WriteScript(scriptPath string, dot ScriptContext) error {
-	script, err := os.Create(scriptPath)
-	if err != nil {
-		return err
-	}
-	defer script.Close()
-	if err := g.Template.Execute(script, dot); err != nil {
-		return err
-	}
-	if *debug {
-		fmt.Println("Script:")
-		if all, err := ioutil.ReadFile(scriptPath); err == nil {
-			fmt.Println("----")
-			fmt.Println(string(all))
-			fmt.Println("----")
-		} else {
-			fmt.Println(err)
-		}
-	}
 	return nil
 }
 
@@ -96,3 +88,6 @@ func (g *Gdb) Run(executable string, scriptPath string) error {
 	}
 	return cmd.Run()
 }
+
+func (g *Gdb) ScriptTemplate() *template.Template { return g.Template }
+func (g *Gdb) Name() string                       { return "gdb" }

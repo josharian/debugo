@@ -1,6 +1,10 @@
 // sanity asks gdb and lldb to echo constant values
 // back to us. It serves as a sanity test of the
 // test system itself.
+//
+// It is also the only test that actually runs any
+// lldb commands, as lldb support in Go is broken.
+// See issue 7070.
 package main
 
 func main() {

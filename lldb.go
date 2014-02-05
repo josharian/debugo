@@ -10,8 +10,6 @@ import (
 	"text/template"
 )
 
-// TODO: DRY up some of the python header boilerplate across lldb, gdb
-
 const lldbScriptTemplate = `
 import json
 import re
@@ -172,7 +170,7 @@ func (l *Lldb) Init() error {
 
 func (l *Lldb) Run(executable string, scriptPath string) error {
 	cmd := exec.Command(l.Python, scriptPath)
-	// TODO: Preserve environ
+	// TODO: Preserve environ(?)
 	// env := os.Environ()
 	// env = append()
 	cmd.Env = []string{"PYTHONPATH=" + l.PythonMod + ":" + os.Getenv("PYTHONPATH")}

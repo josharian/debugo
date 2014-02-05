@@ -5,7 +5,6 @@ package main
 // TODO:
 // * Nice docs for how to write + run tests (NB: each bp only fires once)
 // * Nice high-level description of how this works
-// * lldb basics; more refactoring to make gdb/lldb interface similar
 // * better socket handling (what do we want here?)
 // * refactor -- invoke gdb/lldb only once, load/unload targets in turn.
 //   Should be faster. also, invoke gdb and lldb in parallel?

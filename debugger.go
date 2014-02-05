@@ -9,3 +9,5 @@ type Debugger interface {
 	ScriptTemplate() *template.Template
 	Run(executable string, scriptPath string) error
 }
+
+// TODO: DRY up some of lldb, gdb: python boilerplate, funcMap

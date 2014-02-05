@@ -11,14 +11,13 @@ func Stack() {
 	// i = 0
 	i = 5
 	// BREAKPOINT
-	// (gdb) printf "%d", i
-	// 5
 	// (gdb) print i
-	// \$[0-9]+ = 5
+	// \$1 = 5
 	_ = i
+	b = true
 	// BREAKPOINT
 	// (gdb) print b
-	// \$[0-9]+ = false
+	// \$2 = true
 	_ = b
 }
 

@@ -4,6 +4,7 @@ package main
 
 func Stack() {
 	var i int
+	var b bool
 	// BREAKPOINT
 	// (gdb) info locals
 	// b = false
@@ -15,7 +16,6 @@ func Stack() {
 	// (gdb) print i
 	// \$[0-9]+ = 5
 	_ = i
-	var b bool
 	// BREAKPOINT
 	// (gdb) print b
 	// \$[0-9]+ = false

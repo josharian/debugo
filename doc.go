@@ -10,7 +10,7 @@
 //
 // func Simple() (int, bool) {
 // 	i := 5
-//  b := false
+// 	b := false
 // 	// BREAKPOINT
 // 	// (gdb) print i
 // 	// \$1 = 5

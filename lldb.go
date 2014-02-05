@@ -48,7 +48,7 @@ if not target:
 
 bps = {}
 {{range $bp := .Breakpoints}}
-{{if .LldbTests}}
+{{if .Tests}}
 filename = {{$bp.Filename | printf "%q"}}
 lineno = {{$bp.Line}}
 bp = target.BreakpointCreateByLocation(filename, lineno)
@@ -57,8 +57,10 @@ if bp.GetNumLocations() != 1:
 	sys.exit(1)
 #bp.SetOneShot(True)
 tests = []
-{{range $test := .LldbTests}}
-tests.append(({{$test.Command | printf "%q"}}, {{$test.Want | printf "%q"}}, filename, {{$test.Line}}))
+{{range $test := .Tests}}
+{{if eq $test.Debugger "lldb" }}
+tests.append(({{$test.Command | printf "%q"}}, {{$test.Want | joinn | printf "%q"}}, filename, {{$test.Line}}))
+{{end}}
 {{end}}
 bps[bp.GetID()] = (bp, tests)
 {{end}}
@@ -109,7 +111,7 @@ while True:
 			continue
 
 		out = ret.GetOutput()
-		match = re.match(want, out)
+		match = re.match("^" + want + "$", out)
 		if match is None:
 			msg = "want regex {want} have {out}".format(**locals())
 			send_result("FAIL", msg, filename, lineno)
@@ -152,7 +154,17 @@ func (l *Lldb) Init() error {
 	}
 	l.PythonMod = strings.TrimSpace(pymodBuf.String())
 
-	l.Template = template.Must(template.New("script").Parse(lldbScriptTemplate))
+	funcMap := template.FuncMap{
+		"joinn": func(v interface{}) (string, error) {
+			slice, ok := v.([]string)
+			if !ok {
+				return "", fmt.Errorf("expected []string, got %v (%T)", v, v)
+			}
+			return strings.Join(slice, "\n"), nil
+		},
+	}
+
+	l.Template = template.Must(template.New("script").Funcs(funcMap).Parse(lldbScriptTemplate))
 
 	// TODO: Check lldb version
 	return nil

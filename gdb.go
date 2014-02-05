@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"text/template"
 )
 
@@ -32,8 +33,12 @@ def send_result(status, msg=None, filename=None, lineno=None):
 
 def test(command, want, filename, lineno):
 	send_result("RUNNING", command, filename, lineno)
-	out = gdb.execute(command, False, True)
-	match = re.match(want, out)
+	try:
+		out = gdb.execute(command, False, True)
+	except Exception as e:
+		send_result("FAIL", "failed to execute command '" + command + "': " + str(e), filename, lineno)
+		return
+	match = re.match("^" + want + "$", out)
 	if match is None:
 		msg = "want regex {want} have {out}".format(**locals())
 		send_result("FAIL", msg, filename, lineno)
@@ -42,16 +47,18 @@ def test(command, want, filename, lineno):
 end
 
 {{range $bp := .Breakpoints}}
-{{if .GdbTests}}
-tbreak {{$bp.Filename}}:{{$bp.Line}}
-commands
-silent
-{{range $test := .GdbTests}}
-python test({{$test.Command | printf "%q"}}, {{$test.Want | printf "%q"}}, {{$bp.Filename | printf "%q"}}, {{$test.Line}})
-{{end}}
-continue
-end
-{{end}}
+	{{if .Tests}}
+		tbreak {{$bp.Filename}}:{{$bp.Line}}
+		commands
+		silent
+		{{range $test := .Tests}}
+			{{if eq $test.Debugger "gdb" }}
+				python test({{$test.Command | printf "%q"}}, {{$test.Want | joinn | printf "%q"}}, {{$bp.Filename | printf "%q"}}, {{$test.Line}})
+			{{end}}
+		{{end}}
+		continue
+		end
+	{{end}}
 {{end}}
 run
 `
@@ -68,7 +75,18 @@ func (g *Gdb) Init() error {
 		return err
 	}
 	g.Path = path
-	g.Template = template.Must(template.New("script").Parse(gdbScriptTemplate))
+
+	funcMap := template.FuncMap{
+		"joinn": func(v interface{}) (string, error) {
+			slice, ok := v.([]string)
+			if !ok {
+				return "", fmt.Errorf("expected []string, got %v (%T)", v, v)
+			}
+			return strings.Join(slice, "\n"), nil
+		},
+	}
+
+	g.Template = template.Must(template.New("script").Funcs(funcMap).Parse(gdbScriptTemplate))
 
 	// TODO: Check gdb version
 	return nil

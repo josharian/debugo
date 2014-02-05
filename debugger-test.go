@@ -7,6 +7,8 @@ package main
 // * Nice high-level description of how this works
 // * lldb basics; more refactoring to make gdb/lldb interface similar
 // * better socket handling (what do we want here?)
+// * refactor -- invoke gdb/lldb only once, load/unload targets in turn.
+//   Should be faster. also, invoke gdb and lldb in parallel?
 
 import (
 	"bufio"
@@ -101,8 +103,7 @@ func main() {
 		}
 	}
 	if len(debuggers) == 0 {
-		fmt.Println("No debuggers available.")
-		os.Exit(1) // rc 0?
+		fatal("No debuggers available.")
 	}
 
 	// Set up temp dir
@@ -112,16 +113,15 @@ func main() {
 	}
 	if *debug {
 		fmt.Println("Using temp dir", tempDir)
+		fmt.Println("**Not** cleaning up temp dir on exit")
+	} else {
+		defer func() {
+			err := os.RemoveAll(tempDir)
+			if err != nil {
+				fmt.Println("Failed to clean up temp dir", tempDir, err)
+			}
+		}()
 	}
-	defer func() {
-		if *debug {
-			fmt.Println("Removing temp dir", tempDir)
-		}
-		err := os.RemoveAll(tempDir)
-		if err != nil {
-			fmt.Println("Failed to clean up temp dir", tempDir, err)
-		}
-	}()
 
 	// Set up socket for receiving replies
 	sock := filepath.Join(tempDir, "status.sock")
@@ -141,29 +141,25 @@ func main() {
 			fmt.Printf("Running test %s\n", source)
 		}
 
-		// Parse test case
-		f, err := os.Open(source)
-		if err != nil {
-			fatal(err)
-		}
-		bps, err := Parse(f, source)
-		if err != nil {
-			fmt.Printf("SKIPPING test %s: Failed to parse: %v\n", source, err)
-			f.Close()
-			continue
-		}
-		f.Close()
-
 		// Build executable
 		executable := filepath.Join(tempDir, source[:len(source)-len(".go")])
 		cmd := exec.Command(goTool, "build", "-o", executable, "-gcflags", "-N -l", source)
+		buildErr := new(bytes.Buffer)
+		cmd.Stderr = buildErr
 		if *debug {
 			fmt.Println("Running", cmd)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
 		}
 		if err := cmd.Run(); err != nil {
+			fmt.Printf("Failed to build %s:\n", source)
+			fmt.Println(buildErr.String())
 			fatal(err)
+		}
+
+		// Parse the code to extract test cases
+		bps, err := Parse(source)
+		if err != nil {
+			fmt.Printf("SKIPPING test %s: Failed to parse: %v\n", source, err)
+			continue
 		}
 
 		// Test with all debuggers
@@ -217,7 +213,7 @@ func main() {
 	}
 }
 
-func fatal(e error) {
+func fatal(e interface{}) {
 	fmt.Println(e)
 	os.Exit(1)
 }

@@ -31,7 +31,7 @@
 // can be intermingled freely.
 //
 // The expected output is interpreted as a Python regular expression, thus the
-// escaping of the dollar sign in the example above.
+// escaping of the dollar signs and parens in the example above.
 //
 // The test parser ignores /* */ comments. If you need to add commentary into the
 // middle of a test, you can do so by using /* */.

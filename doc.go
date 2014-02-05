@@ -1,4 +1,4 @@
-// debugger-test runs automated tests of Go's gdb and lldb support.
+// debugo runs automated tests of Go's gdb and lldb support.
 //
 //
 // How to write tests

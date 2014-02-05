@@ -33,7 +33,7 @@ var (
 )
 
 const usageFooter = `
-debugger-test runs automated tests of Go's gdb and lldb integration.
+debugo runs automated tests of Go's gdb and lldb integration.
 `
 
 // ScriptContext is all the information needed to
@@ -106,7 +106,7 @@ func main() {
 	}
 
 	// Set up temp dir
-	tempDir, err := ioutil.TempDir("", "go-debugger-test")
+	tempDir, err := ioutil.TempDir("", "debugo")
 	if err != nil {
 		fatal(err)
 	}

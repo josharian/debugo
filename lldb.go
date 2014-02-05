@@ -195,4 +195,4 @@ func (l *Lldb) Run(executable string, scriptPath string) error {
 }
 
 func (l *Lldb) ScriptTemplate() *template.Template { return l.Template }
-func (g *Lldb) Name() string                       { return "lldb" }
+func (l *Lldb) Name() string                       { return "lldb" }

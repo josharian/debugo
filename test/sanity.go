@@ -13,5 +13,7 @@ func main() {
 	// \$1 = 1
 	// (lldb) print 2
 	// \(int\) \$0 = 2
-	_ = 42 // Need at least one statement here, on pain of breakage. This might be a bug.
+	_ = 42
+	// Need at least one statement above, on pain of test failures.
+	// This might be an edge case bug in Go's DWARF generation.
 }

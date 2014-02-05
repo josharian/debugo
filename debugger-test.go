@@ -1,13 +1,15 @@
-// debugger-test runs automated tests of Go's gdb and lldb support.
-//
 package main
 
 // TODO:
-// * Nice docs for how to write + run tests (NB: each bp only fires once)
-// * Nice high-level description of how this works
-// * better socket handling (what do we want here?)
-// * refactor -- invoke gdb/lldb only once, load/unload targets in turn.
-//   Should be faster. also, invoke gdb and lldb in parallel?
+// * Improve naming, docs, tests
+// * Better socket handling? Kind crude and in-place right now.
+// * Better output formatting, more output formatting options (summary?).
+// * Check to make sure that all breakpoints got hit; fail if not.
+// * Invoke gdb/lldb only once, load/unload targets in turn?
+//   Should be faster, but complicated scripts, and takes longer
+//   to get to first failure.
+// * Run multiple tests in parallel? Should be ok in theory, but
+//   muddles output.
 
 import (
 	"bufio"
@@ -32,8 +34,6 @@ var (
 
 const usageFooter = `
 debugger-test runs automated tests of Go's gdb and lldb integration.
-
-TODO: Describe the format of the automated tests, usage, etc.
 `
 
 // ScriptContext is all the information needed to
